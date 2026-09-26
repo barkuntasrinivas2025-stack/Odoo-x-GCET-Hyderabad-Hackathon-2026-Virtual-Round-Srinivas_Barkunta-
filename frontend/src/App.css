@@ -587,4 +587,46 @@
   .risk-row {
     font-size: 11px;
   }
+}/* ---- Quick-fix patch: append to the end of App.css ---- */
+
+/* Kill the ALL-CAPS template look without touching JSX */
+.eyebrow,
+.risk-label,
+.verify-button,
+.status-pill,
+.modal-submit {
+  text-transform: lowercase;
+}
+.status-pill::first-letter,
+.eyebrow::first-letter {
+  text-transform: uppercase;
+}
+
+/* Tabular numbers so stock/daily-use/days-of-cover columns actually line up */
+.risk-row span,
+.risk-row strong,
+.risk-card strong {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Tighten the dead space at the bottom of the page */
+.dashboard {
+  padding-bottom: 32px;
+}
+
+/* Subtle life on hover — rows and cards shouldn't feel static */
+.risk-row {
+  transition: background 0.15s ease;
+}
+.risk-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Make the pipeline steps capable of an "active" state you can toggle
+   briefly from JS after a real receive (optional, see note below) */
+.pipeline-step.active .pipeline-icon {
+  border-color: var(--green);
+  color: var(--green);
+  box-shadow: 0 0 0 3px rgba(50, 213, 131, 0.15);
 }
