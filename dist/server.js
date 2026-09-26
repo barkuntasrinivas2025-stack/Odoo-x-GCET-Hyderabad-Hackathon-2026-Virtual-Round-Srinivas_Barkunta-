@@ -30,6 +30,42 @@ io.on("connection", (socket) => {
  * to every connected dashboard for that warehouse — this is the "live"
  * moment: no polling, no refresh, the KPI number just moves.
  */
+app.post("/api/documents", async (req, res) => {
+    try {
+        const { docType, sourceWarehouseId, destWarehouseId, reference, lines, } = req.body;
+        if (!["receipt", "delivery", "transfer", "adjustment"].includes(docType)) {
+            return res.status(400).json({ error: "Invalid document type" });
+        }
+        if (!Array.isArray(lines) || lines.length === 0) {
+            return res.status(400).json({ error: "At least one line is required" });
+        }
+        const [document] = await db_1.db
+            .insert(schema_1.documents)
+            .values({
+            docType,
+            sourceWarehouseId: sourceWarehouseId ?? null,
+            destWarehouseId: destWarehouseId ?? null,
+            reference: reference ?? null,
+            status: "draft",
+        })
+            .returning();
+        for (const line of lines) {
+            await db_1.db.insert(schema_1.documentLines).values({
+                documentId: document.id,
+                productId: Number(line.productId),
+                quantity: String(line.quantity),
+            });
+        }
+        res.status(201).json({
+            ok: true,
+            documentId: document.id,
+        });
+    }
+    catch (error) {
+        console.error("Create document failed:", error);
+        res.status(500).json({ error: "Failed to create document" });
+    }
+});
 app.post("/api/documents/:id/validate", async (req, res) => {
     const docId = Number(req.params.id);
     const [doc] = await db_1.db.select().from(schema_1.documents).where((0, drizzle_orm_1.eq)(schema_1.documents.id, docId));
