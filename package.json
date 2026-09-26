@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "db:seed": "tsx src/scripts/seed.ts"
   },
   "dependencies": {
     "express": "^4.19.2",
