@@ -1,62 +1,47 @@
 import { useEffect, useMemo, useState } from "react";
 import { io } from "socket.io-client";
+import "./App.css";
 import {
-  createDocument,
-  getRisk,
-  validateDocument,
+  fetchRisk,
   verifyLedger,
+  receiveStock,
   type StockRisk,
 } from "./api";
-import "./App.css";
 
-const SOCKET_URL = "http://localhost:4000";
+const API_URL = "http://localhost:4000";
 
 function App() {
   const [risk, setRisk] = useState<StockRisk[]>([]);
+  const [ledgerValid, setLedgerValid] = useState<boolean | null>(null);
+  const [checkedRows, setCheckedRows] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [live, setLive] = useState(false);
   const [verifying, setVerifying] = useState(false);
-  const [ledger, setLedger] = useState<{
-    valid: boolean;
-    checkedRows?: number;
-    brokenAtId?: number;
-    reason?: string;
-  } | null>(null);
-
   const [showReceive, setShowReceive] = useState(false);
-  const [productId, setProductId] = useState(3);
-  const [quantity, setQuantity] = useState(20);
   const [receiving, setReceiving] = useState(false);
+  const [eventMessage, setEventMessage] = useState("");
 
-  async function refreshRisk() {
+  const loadDashboard = async () => {
     try {
-      setError("");
-      const data = await getRisk();
+      const data = await fetchRisk();
       setRisk(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load dashboard");
+
+      const ledger = await verifyLedger();
+      setLedgerValid(ledger.valid);
+      setCheckedRows(ledger.checkedRows);
+    } catch (error) {
+      console.error("Dashboard load failed:", error);
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
-    refreshRisk();
+    loadDashboard();
 
-    const socket = io(SOCKET_URL);
-
-    socket.on("connect", () => {
-      setLive(true);
-      socket.emit("join_warehouse", 1);
-    });
-
-    socket.on("disconnect", () => {
-      setLive(false);
-    });
+    const socket = io(API_URL);
 
     socket.on("stock_delta", () => {
-      refreshRisk();
+      loadDashboard();
     });
 
     return () => {
@@ -64,109 +49,121 @@ function App() {
     };
   }, []);
 
-  const counts = useMemo(
-    () => ({
-      critical: risk.filter((item) => item.riskLevel === "critical").length,
-      warning: risk.filter((item) => item.riskLevel === "warning").length,
-      ok: risk.filter((item) => item.riskLevel === "ok").length,
-    }),
+  const critical = useMemo(
+    () => risk.filter((item) => item.riskLevel === "critical").length,
     [risk]
   );
 
-  async function handleVerifyLedger() {
+  const warning = useMemo(
+    () => risk.filter((item) => item.riskLevel === "warning").length,
+    [risk]
+  );
+
+  const healthy = useMemo(
+    () => risk.filter((item) => item.riskLevel === "ok").length,
+    [risk]
+  );
+
+  const handleVerify = async () => {
+    setVerifying(true);
+
     try {
-      setVerifying(true);
       const result = await verifyLedger();
-      setLedger(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ledger verification failed");
+      setLedgerValid(result.valid);
+      setCheckedRows(result.checkedRows);
     } finally {
       setVerifying(false);
     }
-  }
+  };
 
-  async function handleReceive() {
-    if (quantity <= 0) return;
+  const handleReceive = async (
+    productId: number,
+    quantity: number
+  ) => {
+    setReceiving(true);
+    setEventMessage("");
 
     try {
-      setReceiving(true);
-      setError("");
+      await receiveStock(productId, quantity);
 
-      const created = await createDocument({
-        docType: "receipt",
-        destWarehouseId: 1,
-        reference: `DASHBOARD-${Date.now()}`,
-        lines: [
-          {
-            productId,
-            quantity,
-          },
-        ],
-      });
+      setEventMessage(
+        `Received ${quantity} units successfully.`
+      );
 
-      await validateDocument(created.documentId);
+      await loadDashboard();
 
-      await refreshRisk();
-
-      setShowReceive(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Receiving stock failed");
+      setTimeout(() => {
+        setEventMessage("");
+      }, 3000);
+    } catch (error) {
+      console.error(error);
+      setEventMessage("Failed to receive stock.");
     } finally {
       setReceiving(false);
     }
-  }
+  };
 
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div>
-          <div className="brand">
-            <span className="brand-mark">S</span>
-            <span>StockSense</span>
+        <div className="brand">
+          <div className="brand-mark">S</div>
+
+          <div>
+            <div className="brand-name">StockSense</div>
+            <div className="brand-subtitle">
+              Predictive inventory intelligence
+            </div>
           </div>
-          <p className="subtitle">Predictive inventory intelligence</p>
         </div>
 
-        <div className={`live-status ${live ? "online" : ""}`}>
-          <span />
-          {live ? "LIVE" : "OFFLINE"}
+        <div className="topbar-meta">
+          <span className="status-dot" />
+          <span>ONLINE</span>
+          <span className="separator">•</span>
+          <span>WAREHOUSE · HYD-01</span>
         </div>
       </header>
 
       <main className="dashboard">
         <section className="hero">
           <div>
-            <p className="eyebrow">WAREHOUSE · HYD-01</p>
+            <p className="eyebrow">INVENTORY CONTROL</p>
+
             <h1>Inventory Risk</h1>
-            <p>
-              Stock coverage calculated from recent consumption velocity.
+
+            <p className="hero-description">
+              Stock coverage calculated from recent consumption
+              velocity.
             </p>
           </div>
 
-          <button className="primary-button" onClick={() => setShowReceive(true)}>
-            + Receive Stock
+          <button
+            className="primary-button"
+            onClick={() => setShowReceive(true)}
+          >
+            <span>＋</span>
+            Receive Stock
           </button>
         </section>
 
-        {error && <div className="error-banner">{error}</div>}
-
-        <section className="summary-grid">
-          <div className="summary-card critical-card">
-            <span className="summary-label">Critical</span>
-            <strong>{counts.critical}</strong>
-            <small>≤ 3 days of cover</small>
+        <section className="risk-summary">
+          <div className="risk-card critical">
+            <span className="risk-label">CRITICAL</span>
+            <strong>{critical}</strong>
+            <span>≤ 3 days of cover</span>
           </div>
 
-          <div className="summary-card warning-card">
-            <span className="summary-label">Warning</span>
-            <strong>{counts.warning}</strong>
-            <small>≤ 7 days of cover</small>
+          <div className="risk-card warning">
+            <span className="risk-label">WARNING</span>
+            <strong>{warning}</strong>
+            <span>≤ 7 days of cover</span>
           </div>
 
-          <div className="summary-card healthy-card">
-            <span className="summary-label">Healthy</span>
-            <strong>{counts.ok}</strong>
-            <small>More than 7 days</small>
+          <div className="risk-card healthy">
+            <span className="risk-label">HEALTHY</span>
+            <strong>{healthy}</strong>
+            <span>More than 7 days</span>
           </div>
         </section>
 
@@ -176,64 +173,36 @@ function App() {
               <p className="eyebrow">FORECAST</p>
               <h2>Stock coverage</h2>
             </div>
-            <span className="window-badge">14-day consumption window</span>
+
+            <span className="window-badge">
+              14-day consumption window
+            </span>
+          </div>
+
+          <div className="table-header">
+            <span>PRODUCT</span>
+            <span>STOCK</span>
+            <span>DAILY USED</span>
+            <span>DAYS OF COVER</span>
+            <span>STATUS</span>
           </div>
 
           {loading ? (
-            <div className="empty-state">Loading inventory intelligence...</div>
-          ) : (
-            <div className="risk-table">
-              <div className="table-row table-heading">
-                <span>PRODUCT</span>
-                <span>STOCK</span>
-                <span>DAILY USE</span>
-                <span>DAYS OF COVER</span>
-                <span>STATUS</span>
-              </div>
-
-              {risk.map((item) => (
-                <div className="table-row" key={item.productId}>
-                  <div className="product-cell">
-                    <strong>{item.name}</strong>
-                    <small>{item.sku}</small>
-                  </div>
-
-                  <span>{item.currentStock.toLocaleString()} units</span>
-
-                  <span>{item.avgDailyConsumption.toFixed(2)} / day</span>
-
-                  <div className="cover-cell">
-                    <strong>
-                      {item.daysOfCover === null
-                        ? "—"
-                        : `${item.daysOfCover.toFixed(1)}d`}
-                    </strong>
-
-                    {item.daysOfCover !== null && (
-                      <div className="cover-bar">
-                        <span
-                          style={{
-                            width: `${Math.min(
-                              Math.max(item.daysOfCover * 3, 5),
-                              100
-                            )}%`,
-                          }}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <span className={`risk-badge ${item.riskLevel}`}>
-                    {item.riskLevel}
-                  </span>
-                </div>
-              ))}
+            <div className="empty-state">
+              Loading inventory intelligence...
             </div>
+          ) : (
+            risk.map((item) => (
+              <RiskRow
+                key={item.productId}
+                item={item}
+              />
+            ))
           )}
         </section>
 
         <section className="bottom-grid">
-          <div className="panel ledger-panel">
+          <div className="panel audit-panel">
             <div className="panel-header">
               <div>
                 <p className="eyebrow">AUDIT TRAIL</p>
@@ -241,124 +210,226 @@ function App() {
               </div>
             </div>
 
-            <p className="ledger-description">
-              Every stock movement is chained cryptographically. Any database
-              modification breaks the chain and is detectable.
+            <p className="audit-description">
+              Every stock movement is chained cryptographically.
+              Any database modification breaks the chain and is
+              detectable.
             </p>
 
             <button
               className="verify-button"
-              onClick={handleVerifyLedger}
+              onClick={handleVerify}
               disabled={verifying}
             >
               {verifying ? "VERIFYING..." : "VERIFY LEDGER"}
             </button>
 
-            {ledger && (
-              <div className={`ledger-result ${ledger.valid ? "valid" : "invalid"}`}>
-                <span className="result-icon">
-                  {ledger.valid ? "✓" : "!"}
-                </span>
-
-                <div>
-                  <strong>
-                    {ledger.valid
-                      ? `${ledger.checkedRows} records valid`
-                      : `Broken at record ${ledger.brokenAtId}`}
-                  </strong>
-
-                  <small>
-                    {ledger.valid
-                      ? "Hash chain integrity confirmed"
-                      : ledger.reason}
-                  </small>
-                </div>
+            <div
+              className={`ledger-result ${
+                ledgerValid ? "valid" : "invalid"
+              }`}
+            >
+              <div className="ledger-icon">
+                {ledgerValid ? "✓" : "!"}
               </div>
-            )}
+
+              <div>
+                <strong>
+                  {ledgerValid
+                    ? `${checkedRows} records valid`
+                    : "Integrity check failed"}
+                </strong>
+
+                <span>
+                  {ledgerValid
+                    ? "Hash chain integrity confirmed"
+                    : "Hash chain requires investigation"}
+                </span>
+              </div>
+            </div>
           </div>
 
-          <div className="panel demo-panel">
-            <p className="eyebrow">LIVE DEMO</p>
-            <h2>Inventory event pipeline</h2>
-
-            <div className="pipeline">
-              <span>Receive</span>
-              <b>→</b>
-              <span>Validate</span>
-              <b>→</b>
-              <span>Ledger</span>
-              <b>→</b>
-              <span>Forecast</span>
+          <div className="panel pipeline-panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">LIVE DEMO</p>
+                <h2>Inventory event pipeline</h2>
+              </div>
             </div>
 
-            <p>
-              Stock changes are broadcast to connected dashboards through
-              Socket.IO without a page refresh.
+            <div className="pipeline">
+              <PipelineStep label="Receive" />
+              <PipelineArrow />
+              <PipelineStep label="Validate" />
+              <PipelineArrow />
+              <PipelineStep label="Ledger" />
+              <PipelineArrow />
+              <PipelineStep label="Forecast" />
+            </div>
+
+            <p className="pipeline-description">
+              Stock changes are broadcast to connected dashboards
+              through Socket.IO without a page refresh.
             </p>
+
+            {eventMessage && (
+              <div className="event-message">
+                ✓ {eventMessage}
+              </div>
+            )}
           </div>
         </section>
       </main>
 
       {showReceive && (
-        <div className="modal-backdrop" onClick={() => setShowReceive(false)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <div>
-                <p className="eyebrow">INVENTORY EVENT</p>
-                <h2>Receive stock</h2>
-              </div>
-
-              <button
-                className="close-button"
-                onClick={() => setShowReceive(false)}
-              >
-                ×
-              </button>
-            </div>
-
-            <label>
-              Product
-              <select
-                value={productId}
-                onChange={(event) => setProductId(Number(event.target.value))}
-              >
-                {risk.map((item) => (
-                  <option key={item.productId} value={item.productId}>
-                    {item.name} · {item.sku}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              Quantity
-              <input
-                type="number"
-                min="1"
-                value={quantity}
-                onChange={(event) => setQuantity(Number(event.target.value))}
-              />
-            </label>
-
-            <div className="modal-actions">
-              <button
-                className="secondary-button"
-                onClick={() => setShowReceive(false)}
-              >
-                Cancel
-              </button>
-
-              <button
-                className="primary-button"
-                onClick={handleReceive}
-                disabled={receiving}
-              >
-                {receiving ? "PROCESSING..." : "Receive & Validate"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ReceiveModal
+          risk={risk}
+          receiving={receiving}
+          onClose={() => setShowReceive(false)}
+          onReceive={handleReceive}
+        />
       )}
+    </div>
+  );
+}
+
+function RiskRow({ item }: { item: StockRisk }) {
+  const statusLabel =
+    item.riskLevel === "critical"
+      ? "CRITICAL"
+      : item.riskLevel === "warning"
+      ? "WARNING"
+      : "OK";
+
+  return (
+    <div className="risk-row">
+      <div className="product-cell">
+        <strong>{item.name}</strong>
+        <span>{item.sku}</span>
+      </div>
+
+      <span>{item.currentStock} units</span>
+
+      <span>{item.avgDailyConsumption.toFixed(2)} / day</span>
+
+      <strong className={`cover ${item.riskLevel}`}>
+        {item.daysOfCover === null
+          ? "—"
+          : `${item.daysOfCover.toFixed(1)}d`}
+      </strong>
+
+      <span className={`status-pill ${item.riskLevel}`}>
+        <i />
+        {statusLabel}
+      </span>
+    </div>
+  );
+}
+
+function PipelineStep({ label }: { label: string }) {
+  return (
+    <div className="pipeline-step">
+      <div className="pipeline-icon">✓</div>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function PipelineArrow() {
+  return <span className="pipeline-arrow">→</span>;
+}
+
+function ReceiveModal({
+  risk,
+  receiving,
+  onClose,
+  onReceive,
+}: {
+  risk: StockRisk[];
+  receiving: boolean;
+  onClose: () => void;
+  onReceive: (productId: number, quantity: number) => void;
+}) {
+  const [productId, setProductId] = useState(
+    risk[0]?.productId ?? 1
+  );
+  const [quantity, setQuantity] = useState(10);
+
+  const selected = risk.find(
+    (item) => item.productId === productId
+  );
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="modal"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">INVENTORY EVENT</p>
+            <h2>Receive stock</h2>
+          </div>
+
+          <button
+            className="close-button"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
+
+        <label>
+          Product
+          <select
+            value={productId}
+            onChange={(event) =>
+              setProductId(Number(event.target.value))
+            }
+          >
+            {risk.map((item) => (
+              <option
+                key={item.productId}
+                value={item.productId}
+              >
+                {item.name} · {item.sku}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          Quantity
+          <input
+            type="number"
+            min="1"
+            value={quantity}
+            onChange={(event) =>
+              setQuantity(Number(event.target.value))
+            }
+          />
+        </label>
+
+        {selected && (
+          <div className="receive-preview">
+            <span>Current stock</span>
+            <strong>
+              {selected.currentStock} →{" "}
+              {selected.currentStock + quantity} units
+            </strong>
+          </div>
+        )}
+
+        <button
+          className="primary-button modal-submit"
+          disabled={receiving || quantity <= 0}
+          onClick={() =>
+            onReceive(productId, quantity)
+          }
+        >
+          {receiving ? "PROCESSING..." : "RECEIVE STOCK"}
+        </button>
+      </div>
     </div>
   );
 }
