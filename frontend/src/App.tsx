@@ -35,19 +35,33 @@ function App() {
     }
   };
 
-  useEffect(() => {
+useEffect(() => {
+  loadDashboard();
+
+  const socket = io(API_URL);
+
+  socket.on("connect", () => {
+    console.log("[SOCKET] connected:", socket.id);
+
+    // Dashboard is for warehouse HYD-01
+    socket.emit("join_warehouse", 1);
+
+    console.log("[SOCKET] joined warehouse:1");
+  });
+
+  socket.on("stock_delta", (payload) => {
+    console.log("[SOCKET] stock_delta received:", payload);
     loadDashboard();
+  });
 
-    const socket = io(API_URL);
+  socket.on("disconnect", () => {
+    console.log("[SOCKET] disconnected");
+  });
 
-    socket.on("stock_delta", () => {
-      loadDashboard();
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
+  return () => {
+    socket.disconnect();
+  };
+}, []);
 
   const critical = useMemo(
     () => risk.filter((item) => item.riskLevel === "critical").length,
